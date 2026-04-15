@@ -1,0 +1,106 @@
+domain      = "content.pipeline"
+description = "Content creation pipeline with editorial review"
+main_pipe   = "create_article"
+
+# ── Concepts ──
+
+[concept.ContentBrief]
+description = "A brief describing the article to write"
+
+[concept.ContentBrief.structure]
+topic    = { type = "text", description = "The main topic" }
+audience = { type = "text", description = "Target audience" }
+tone     = { type = "text", description = "Desired tone: formal, casual, technical" }
+length   = { type = "text", description = "Approximate word count" }
+
+[concept.DraftArticle]
+description = "A first draft of the article"
+refines     = "Text"
+
+[concept.EditorialFeedback]
+description = "Structured editorial feedback on a draft"
+
+[concept.EditorialFeedback.structure]
+clarity_score   = { type = "text", description = "Score 1-10" }
+engagement      = { type = "text", description = "Score 1-10" }
+accuracy        = { type = "text", description = "Score 1-10" }
+suggestions     = { type = "text", description = "Improvement suggestions" }
+critical_issues = { type = "text", description = "Must-fix issues" }
+
+[concept.FinalArticle]
+description = "The polished, publication-ready article"
+refines     = "Text"
+
+# ── Sequence controller ──
+
+[pipe.create_article]
+type        = "PipeSequence"
+description = "Full editorial pipeline: draft, review, polish"
+output      = "FinalArticle"
+steps = [
+    { pipe = "write_draft",      result = "draft" },
+    { pipe = "editorial_review", result = "feedback" },
+    { pipe = "polish_article",   result = "final" },
+]
+
+# ── Step 1: Writer agent ──
+
+[pipe.write_draft]
+type        = "PipeLLM"
+description = "Write the first draft based on the content brief"
+inputs      = { brief = "ContentBrief" }
+output      = "DraftArticle"
+model       = { model = "ollama/gemma4:e2b", temperature = 0.7 }
+system_prompt = "You are an experienced content writer."
+prompt = """
+Write a first draft based on this content brief:
+
+Topic: $brief.topic
+Audience: $brief.audience
+Tone: $brief.tone
+Target length: $brief.length words
+
+Write naturally and engagingly. Don't self-censor — this is a first draft.
+"""
+
+# ── Step 2: Editor agent ──
+
+[pipe.editorial_review]
+type        = "PipeLLM"
+description = "Review the draft and provide structured feedback"
+inputs      = { draft = "DraftArticle", brief = "ContentBrief" }
+output      = "EditorialFeedback"
+model       = { model = "ollama/gemma4:e2b", temperature = 0.2 }
+system_prompt = "You are a senior editor with 20 years of experience."
+prompt = """
+Review this draft against the original brief and provide structured
+editorial feedback with scores and actionable suggestions.
+
+## Original Brief
+Topic: $brief.topic | Audience: $brief.audience | Tone: $brief.tone
+
+## Draft
+@draft
+"""
+
+# ── Step 3: Copy editor agent ──
+
+[pipe.polish_article]
+type        = "PipeLLM"
+description = "Polish the draft using editorial feedback"
+inputs      = { draft = "DraftArticle", feedback = "EditorialFeedback" }
+output      = "FinalArticle"
+model       = { model = "ollama/gemma4:e2b", temperature = 0.4 }
+system_prompt = "You are a meticulous copy editor."
+prompt = """
+Polish this draft using the editorial feedback provided.
+Fix all critical issues and apply the suggestions.
+
+## Draft
+@draft
+
+## Feedback
+@feedback
+
+Produce a final, publication-ready article.
+"""

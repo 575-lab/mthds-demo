@@ -1,0 +1,113 @@
+domain      = "research.pipeline"
+description = "Multi-agent research pipeline using CrewAI with Ollama"
+main_pipe   = "deep_research"
+
+# ── Concepts ──
+
+[concept.ResearchQuestion]
+description = "A well-formed research question to investigate"
+refines     = "Text"
+
+[concept.SourceSummary]
+description = "A summary of findings from a single source"
+refines     = "Text"
+
+[concept.ResearchBrief]
+description = "A structured research brief synthesizing multiple sources"
+refines     = "Text"
+
+[concept.FactCheck]
+description = "A fact-check verdict with confidence score"
+
+[concept.FactCheck.structure]
+claim      = { type = "text", description = "The claim being verified" }
+verdict    = { type = "text", description = "true, false, or unverified" }
+confidence = { type = "text", description = "Confidence from 0.0 to 1.0" }
+reasoning  = { type = "text", description = "Why this verdict was reached" }
+
+# ── Sequence controller ──
+
+[pipe.deep_research]
+type        = "PipeSequence"
+description = "Run a full research pipeline: gather, verify, synthesize"
+output      = "ResearchBrief"
+steps = [
+    { pipe = "gather_sources",    result = "summaries" },
+    { pipe = "batch_fact_check",  result = "checks" },
+    { pipe = "synthesize_brief",  result = "brief" },
+]
+
+# ── Step 1: Researcher agent ──
+
+[pipe.gather_sources]
+type   = "PipeLLM"
+description = "Gather and summarize 3 key sources on the topic"
+inputs = { question = "ResearchQuestion" }
+output = "SourceSummary[3]"
+model  = { model = "ollama/gemma4:e2b", temperature = 0.3 }
+system_prompt = """
+You are a meticulous research analyst.
+Always cite your reasoning. Be thorough but concise.
+"""
+prompt = """
+Research the following question and provide 3 distinct source
+summaries, each from a different angle or perspective:
+
+@question
+"""
+
+# ── Step 2: Fact-checker agent ──
+
+[pipe.batch_fact_check]
+type             = "PipeBatch"
+description      = "Fact-check each source summary"
+inputs           = { summaries = "SourceSummary[]" }
+output           = "FactCheck[]"
+branch_pipe_code = "verify_claim"
+input_list_name  = "summaries"
+input_item_name  = "summary"
+
+[pipe.verify_claim]
+type        = "PipeLLM"
+description = "Verify claims in a single source summary"
+inputs      = { summary = "SourceSummary" }
+output      = "FactCheck"
+model       = { model = "ollama/gemma4:e2b", temperature = 0.1 }
+system_prompt = """
+You are a rigorous fact-checker. Evaluate claims critically.
+Return structured verdicts with confidence scores.
+"""
+prompt = """
+Fact-check the key claims in this source summary.
+Provide a verdict (true / false / unverified), a confidence
+score (0.0-1.0), and your reasoning.
+
+@summary
+"""
+
+# ── Step 3: Writer agent ──
+
+[pipe.synthesize_brief]
+type        = "PipeLLM"
+description = "Synthesize verified findings into a research brief"
+inputs      = { summaries = "SourceSummary[]", checks = "FactCheck[]" }
+output      = "ResearchBrief"
+model       = { model = "ollama/gemma4:e2b", temperature = 0.5 }
+system_prompt = """
+You are a senior research writer. Produce clear, well-structured
+briefs that synthesize multiple sources. Distinguish verified
+facts from unverified claims.
+"""
+prompt = """
+Using the verified source summaries and fact-check results below,
+write a concise research brief.
+
+## Source Summaries
+@summaries
+
+## Fact-Check Results
+@checks
+
+Structure the brief with: Executive Summary, Key Findings,
+Confidence Assessment, and Open Questions.
+"""

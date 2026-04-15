@@ -1,0 +1,101 @@
+domain      = "engineering.review"
+description = "Automated code review with security + quality agents"
+main_pipe   = "full_review"
+
+# ── Concepts ──
+
+[concept.CodeSnippet]
+description = "A block of source code to review"
+refines     = "Text"
+
+[concept.SecurityAudit]
+description = "Security findings from code analysis"
+
+[concept.SecurityAudit.structure]
+severity      = { type = "text", description = "critical, high, medium, low" }
+vulnerability = { type = "text", description = "Type of vulnerability found" }
+location      = { type = "text", description = "Where in the code" }
+fix           = { type = "text", description = "Suggested remediation" }
+
+[concept.QualityReport]
+description = "Code quality assessment"
+
+[concept.QualityReport.structure]
+readability     = { type = "text", description = "Score 1-10" }
+maintainability = { type = "text", description = "Score 1-10" }
+test_coverage   = { type = "text", description = "Assessment of test needs" }
+refactors       = { type = "text", description = "Suggested refactoring" }
+
+[concept.ReviewSummary]
+description = "Combined review summary with prioritized action items"
+refines     = "Text"
+
+# ── Sequence controller ──
+
+[pipe.full_review]
+type        = "PipeSequence"
+description = "Run security audit and quality review in sequence"
+output      = "ReviewSummary"
+steps = [
+    { pipe = "security_scan",  result = "security" },
+    { pipe = "quality_check",  result = "quality" },
+    { pipe = "combine_review", result = "summary" },
+]
+
+# ── Step 1: Security agent ──
+
+[pipe.security_scan]
+type        = "PipeLLM"
+description = "Scan code for security vulnerabilities"
+inputs      = { code = "CodeSnippet" }
+output      = "SecurityAudit"
+model       = { model = "ollama/gemma4:e2b", temperature = 0.1 }
+system_prompt = """
+You are a senior application security engineer.
+Identify OWASP Top 10 vulnerabilities, injection risks,
+authentication flaws, and data exposure issues.
+"""
+prompt = """
+Perform a thorough security audit of the following code:
+
+@code
+"""
+
+# ── Step 2: Quality agent ──
+
+[pipe.quality_check]
+type        = "PipeLLM"
+description = "Assess code quality and maintainability"
+inputs      = { code = "CodeSnippet" }
+output      = "QualityReport"
+model       = { model = "ollama/gemma4:e2b", temperature = 0.2 }
+system_prompt = """
+You are a staff engineer reviewing code for quality.
+Focus on readability, SOLID principles, error handling, and testability.
+"""
+prompt = """
+Review this code for quality and maintainability:
+
+@code
+"""
+
+# ── Step 3: Synthesizer agent ──
+
+[pipe.combine_review]
+type        = "PipeLLM"
+description = "Synthesize security + quality findings into a review"
+inputs      = { security = "SecurityAudit", quality = "QualityReport", code = "CodeSnippet" }
+output      = "ReviewSummary"
+model       = { model = "ollama/gemma4:e2b", temperature = 0.3 }
+system_prompt = "You are a tech lead producing final code review summaries."
+prompt = """
+Combine security and quality findings into a final code review.
+
+## Security Findings
+@security
+
+## Quality Assessment
+@quality
+
+Prioritize by severity and provide a clear action plan.
+"""
